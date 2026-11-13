@@ -134,6 +134,15 @@ def main():
                 lambda: "REX_FLOAT" not in capture(initial),
                 "external float is not duplicated in the tiled pane",
             )
+            assert json.loads(
+                expr(
+                    "json_encode([nvim_win_get_width("
+                    + floating
+                    + "), nvim_win_get_height("
+                    + floating
+                    + ")])"
+                )
+            ) == [30, 5], "renderer enlarged the popup beyond its requested size"
             expr("nvim_win_close(" + floating + ", v:true)")
             wait(lambda: len(blocks()) == 1, "float close removes its Rex layer")
             expr('execute("tabnew")')

@@ -45,15 +45,23 @@ func (m *manager) syncFloats(views []screen.View) error {
 			continue
 		}
 		p := m.panes[v.Grid]
+		if p != nil && p.floatResize == [2]int{v.Width, v.Height} {
+			p.geometry = geometry(v)
+			p.floatResize = [2]int{}
+		}
 		if p != nil && p.geometry == geometry(v) && p.floatRoot == root {
 			continue
+		}
+		size := [2]int{v.Width, v.Height}
+		if p != nil && p.geometry == geometry(v) && p.floatSize != [2]int{} {
+			size = p.floatSize
 		}
 		x := space[0] + float64(v.Col)/float64(max(1, m.rootW))*space[2]
 		y := space[1] + float64(v.Row)/float64(max(1, m.rootH))*space[3]
 		x = math.Max(0, math.Min(.999, x))
 		y = math.Max(0, math.Min(.999, y))
-		width := math.Max(.001, math.Min(float64(v.Width)/float64(max(1, m.rootW))*space[2], 1-x))
-		height := math.Max(.001, math.Min(float64(v.Height)/float64(max(1, m.rootH))*space[3], 1-y))
+		width := math.Max(.001, math.Min(float64(size[0])/float64(max(1, m.rootW))*space[2], 1-x))
+		height := math.Max(.001, math.Min(float64(size[1])/float64(max(1, m.rootH))*space[3], 1-y))
 		bounds := [4]float64{x, y, width, height}
 		if p == nil {
 			block, layer, err := m.rex.Float(m.ctx, window, bounds, m.command(v.Grid))
@@ -67,7 +75,7 @@ func (m *manager) syncFloats(views []screen.View) error {
 				return err
 			}
 		}
-		p.bounds, p.geometry, p.floatRoot = bounds, geometry(v), root
+		p.bounds, p.geometry, p.floatRoot, p.floatSize = bounds, geometry(v), root, size
 	}
 	return nil
 }
@@ -86,16 +94,23 @@ func (m *manager) fitFloat(p *peer) error {
 	if view == nil {
 		return nil
 	}
-	if view.Width != p.width || view.Height != p.height {
-		if err := m.nv.TryResizeUIGrid(p.grid, p.width, p.height); err != nil {
+	if p.floatSize == [2]int{} {
+		p.floatSize = [2]int{view.Width, view.Height}
+	}
+	// Terminal space can constrain a popup, but must not replace its requested size.
+	w, h := min(p.width, p.floatSize[0]), min(p.height, p.floatSize[1])
+	if view.Width != w || view.Height != h {
+		if err := m.nv.TryResizeUIGrid(p.grid, w, h); err != nil {
 			return err
 		}
+		p.floatResize = [2]int{w, h}
 	}
 	// A terminal has headers/padding not measured in Neovim cells. Its size is
 	// feedback, not a new request to resize the Rex layer again.
 	for _, v := range m.views() {
-		if v.Grid == p.grid {
+		if v.Grid == p.grid && v.Width == w && v.Height == h {
 			p.geometry = geometry(v)
+			p.floatResize = [2]int{}
 			break
 		}
 	}
