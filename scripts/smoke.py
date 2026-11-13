@@ -80,6 +80,42 @@ def main():
                 "shared buffer renders in both blocks",
             )
             assert expr("len(nvim_list_bufs())").strip() == "1"
+            # Noice opens a Lua editor-relative border and a nested input.
+            owner = expr("nvim_get_current_win()").strip()
+            popup = expr(
+                "luaeval(\"vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                "{relative='editor',row=2,col=(vim.o.columns-64)/2,"
+                "width=64,height=3,focusable=false})\")"
+            ).strip()
+            popup_input = expr(
+                "luaeval(\"vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                "{relative='win',win="
+                + popup
+                + ",row=1,col=2,width=60,height=1,focusable=false,zindex=200})\")"
+            ).strip()
+            assert expr("nvim_win_get_config(" + popup + ").win").strip() == owner
+            popup_text = "REX_POPUP_LEFT".ljust(45, ".") + "REX_POPUP_RIGHT"
+            expr(
+                "nvim_buf_set_lines(nvim_win_get_buf("
+                + popup_input
+                + "), 0, -1, v:false, ["
+                + json.dumps(popup_text)
+                + "])"
+            )
+            def popup_in_one_pane():
+                frames = [capture(b) for b in blocks()]
+                return (
+                    sum(
+                        "REX_POPUP_LEFT" in frame and "REX_POPUP_RIGHT" in frame
+                        for frame in frames
+                    ) == 1
+                    and sum("REX_POPUP_" in frame for frame in frames) == 1
+                )
+
+            wait(popup_in_one_pane, "complete command popup stays in its originating pane")
+            assert len(blocks()) == 2, "nonfocusable popup created a Rex block"
+            expr("nvim_win_close(" + popup_input + ", v:true)")
+            expr("nvim_win_close(" + popup + ", v:true)")
             expr('execute("vertical resize 30")')
 
             def split_ratio():

@@ -1,6 +1,11 @@
 package editor
 
-const configure = `
+import _ "embed"
+
+//go:embed popup.lua
+var popupConfig string
+
+var configure = `
 vim.g.rex_nvim = true
 vim.g.rex_nvim_cmdheight = vim.o.cmdheight
 vim.api.nvim_create_autocmd('OptionSet', {
@@ -10,4 +15,4 @@ vim.api.nvim_create_autocmd('OptionSet', {
   if not vim.g.rex_nvim_fitting then vim.g.rex_nvim_cmdheight=vim.o.cmdheight end
  end
 })
-`
+` + popupConfig

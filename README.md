@@ -32,8 +32,9 @@ Neovim arguments pass through unchanged. Your normal configuration loads;
   update the Rex layout.
 - Rex focus and terminal-size changes update Neovim. Closing a Rex block closes
   its Neovim window; a rejected modified-buffer close recreates the block.
-- Focusable Neovim floats use Rex floating blocks. Nonfocusable floats and
-  completion menus stay composited with their owning pane.
+- Lua editor-relative popups are sized and positioned within their originating
+  pane. Focusable floats use Rex floating blocks; other overlays stay composited
+  in their pane.
 - Neovim tab pages switch the windows shown in the existing Rex tab.
 - `:qa` exits the shared editor. Closing its **last tiled Rex block terminates
   the editor, including unsaved changes**. Closing the original block does not
