@@ -1,0 +1,19 @@
+[tasks.build]
+description = "Build rex-nvim"
+dir = "{{ config_root }}"
+run = "go build -o build/rex-nvim ./cmd/rex-nvim"
+
+[tasks.deploy]
+description = "Build and atomically install rex-nvim into ./bin"
+dir = "{{ config_root }}"
+depends = ["build"]
+run = '''
+set -eu
+mkdir -p bin
+temporary=$(mktemp "./bin/.rex-nvim.XXXXXX")
+trap 'rm -f "$temporary"' EXIT
+trap 'exit 1' HUP INT TERM
+cp build/rex-nvim "$temporary"
+chmod 755 "$temporary"
+mv -f "$temporary" bin/rex-nvim
+'''
