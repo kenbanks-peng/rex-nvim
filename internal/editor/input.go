@@ -7,12 +7,15 @@ import (
 	"github.com/neovim/go-client/nvim"
 )
 
-type inputRoute struct{ grid, window int }
+type inputRoute struct {
+	grid, window int
+	passive      bool
+}
 
 func (m *manager) routePeer(p *peer) {
 	for _, v := range m.views() {
 		if v.Grid == p.grid {
-			p.route.Store(&inputRoute{p.grid, v.Window})
+			p.route.Store(&inputRoute{grid: p.grid, window: v.Window, passive: v.Float && !v.Focusable})
 			return
 		}
 	}
@@ -38,7 +41,7 @@ func (m *manager) sendKeys() {
 		if route == nil {
 			continue
 		}
-		if m.activeGrid.Load() != int64(route.grid) && e.msg.Type != "mouse" {
+		if !route.passive && m.activeGrid.Load() != int64(route.grid) && e.msg.Type != "mouse" {
 			previous := m.activeGrid.Swap(int64(route.grid))
 			queued, err := m.pumpOperation(func() error { return m.nv.SetCurrentWindow(nvim.Window(route.window)) })
 			if err == nil {

@@ -93,7 +93,7 @@ def main():
                 + popup
                 + ",row=1,col=2,width=60,height=1,focusable=false,zindex=200})\")"
             ).strip()
-            assert expr("nvim_win_get_config(" + popup + ").win").strip() == owner
+            assert expr("nvim_win_get_config(" + popup + ").relative").strip() == "editor"
             popup_text = "REX_POPUP_LEFT".ljust(45, ".") + "REX_POPUP_RIGHT"
             expr(
                 "nvim_buf_set_lines(nvim_win_get_buf("
@@ -112,10 +112,29 @@ def main():
                     and sum("REX_POPUP_" in frame for frame in frames) == 1
                 )
 
-            wait(popup_in_one_pane, "complete command popup stays in its originating pane")
-            assert len(blocks()) == 2, "nonfocusable popup created a Rex block"
+            wait(lambda: len(blocks()) == 4, "nonfocusable popups create Rex floating blocks")
+            wait(popup_in_one_pane, "nested popup renders only in its floating block")
+            assert expr("nvim_get_current_win()").strip() == owner, "overlay stole editor focus"
+            view = json.loads(run("rex", "session", "inspect", session, "--json"))
+            tiled = [
+                b["block_id"]
+                for layer in view["windows"][0]["layers"]
+                if layer["kind"] == "tiled"
+                for b in layer["blocks"]
+            ]
+            assert all("REX_POPUP_" not in capture(b) for b in tiled)
+            overlay_block = next(b for b in blocks() if "REX_POPUP_LEFT" in capture(b))
+            run("rex", "focus", "-s", session, overlay_block)
+            wait(
+                lambda: json.loads(run("rex", "session", "inspect", session, "--json"))[
+                    "windows"
+                ][0]["focused_block_id"] != overlay_block,
+                "display-only Rex float returns focus to the editor",
+            )
+            assert expr("nvim_get_current_win()").strip() == owner
             expr("nvim_win_close(" + popup_input + ", v:true)")
             expr("nvim_win_close(" + popup + ", v:true)")
+            wait(lambda: len(blocks()) == 2, "overlay close removes Rex layers")
             expr('execute("vertical resize 30")')
 
             def split_ratio():

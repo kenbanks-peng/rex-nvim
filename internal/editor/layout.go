@@ -103,6 +103,9 @@ func (m *manager) reconcile() error {
 	if err := m.syncFloats(views); err != nil {
 		return err
 	}
+	for _, p := range m.panes {
+		m.routePeer(p)
+	}
 	m.mu.Lock()
 	cursor := m.state.CursorGrid()
 	m.mu.Unlock()

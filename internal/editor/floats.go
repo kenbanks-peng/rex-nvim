@@ -8,12 +8,20 @@ import (
 )
 
 func geometry(v screen.View) [4]int { return [4]int{v.Row, v.Col, v.Width, v.Height} }
+func (m *manager) ownsTiledBlock(block string) bool {
+	for _, p := range m.panes {
+		if p.layer == "" && p.block == block {
+			return true
+		}
+	}
+	return block == m.initial
+}
 func (m *manager) floatSpace(view rex.View) (string, [4]float64) {
 	for _, w := range view.Windows {
 		for _, l := range w.Layers {
 			for _, b := range l.Blocks {
-				if b.ID == m.initial {
-					return w.ID, editorBounds(l.Layout, m.panes)
+				if m.ownsTiledBlock(b.ID) {
+					return w.ID, [4]float64{0, 0, 1, 1}
 				}
 			}
 		}
@@ -23,7 +31,7 @@ func (m *manager) floatSpace(view rex.View) (string, [4]float64) {
 func (m *manager) syncFloats(views []screen.View) error {
 	needed := false
 	for _, v := range views {
-		if v.Float && v.Focusable && !v.Hidden {
+		if v.Float && !v.Hidden {
 			needed = true
 			break
 		}
@@ -41,7 +49,7 @@ func (m *manager) syncFloats(views []screen.View) error {
 	}
 	root := [2]int{m.rootW, m.rootH}
 	for _, v := range views {
-		if !v.Float || !v.Focusable || v.Hidden {
+		if !v.Float || v.Hidden {
 			continue
 		}
 		p := m.panes[v.Grid]

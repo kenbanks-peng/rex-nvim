@@ -312,6 +312,20 @@ func (m *manager) focus(grid int) error {
 	}
 	for _, v := range m.views() {
 		if v.Grid == grid {
+			if v.Float && !v.Focusable {
+				m.mu.Lock()
+				cursor := m.state.CursorGrid()
+				m.mu.Unlock()
+				if cursor != grid {
+					if active := m.panes[cursor]; active != nil {
+						return m.rex.Focus(m.ctx, active.block)
+					}
+					if active := m.panes[m.lastFocus]; active != nil {
+						return m.rex.Focus(m.ctx, active.block)
+					}
+					return nil
+				}
+			}
 			previous := m.activeGrid.Swap(int64(grid))
 			if err := m.nv.SetCurrentWindow(nvim.Window(v.Window)); err != nil {
 				m.activeGrid.CompareAndSwap(int64(grid), previous)
@@ -338,10 +352,8 @@ func (m *manager) draw() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	external := map[int]bool{}
-	for grid, p := range m.panes {
-		if p.conn != nil {
-			external[grid] = true
-		}
+	for grid := range m.panes {
+		external[grid] = true
 	}
 	m.state.SetExternalGrids(external)
 	for grid, p := range m.panes {
