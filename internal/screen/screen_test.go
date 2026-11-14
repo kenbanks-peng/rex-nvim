@@ -32,7 +32,7 @@ func TestApplyCallbacksAndLifecycle(t *testing.T) {
 		t.Fatal("nested flush ignored")
 	}
 	views := s.Views()
-	if len(views) != 1 || views[0] != (View{Grid: 2, Window: 45, Row: 1, Col: 3, Width: 4, Height: 2, Focusable: true}) {
+	if len(views) != 1 || views[0] != (View{Grid: 2, Window: 45, Row: 1, Col: 3, Width: 4, Height: 2, Focusable: true, ResizeID: 1}) {
 		t.Fatalf("%+v", views)
 	}
 	views[0].Hidden = true

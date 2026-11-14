@@ -10,6 +10,7 @@ import (
 type View struct {
 	Grid, Window, Row, Col, Width, Height int
 	Float, Focusable, Hidden              bool
+	ResizeID                              uint64 // Increases for each grid_resize event.
 }
 
 type cell struct {
@@ -19,6 +20,7 @@ type cell struct {
 type grid struct {
 	width, height int
 	cells         []cell
+	resizeID      uint64
 }
 type placement struct {
 	View
@@ -87,7 +89,7 @@ func (s *State) Views() []View {
 		v := p.View
 		v.Row, v.Col, _ = s.origin(id, make(map[int]bool))
 		if g := s.grids[id]; g != nil {
-			v.Width, v.Height = g.width, g.height
+			v.Width, v.Height, v.ResizeID = g.width, g.height, g.resizeID
 		}
 		out = append(out, v)
 	}
@@ -136,8 +138,9 @@ func (s *State) apply(name string, a []any) {
 	switch name {
 	case "grid_resize":
 		w, h := max(0, n(1)), max(0, n(2))
-		next := &grid{w, h, blank(w * h)}
+		next := &grid{width: w, height: h, cells: blank(w * h), resizeID: 1}
 		if g != nil {
+			next.resizeID = g.resizeID + 1
 			for r := 0; r < min(h, g.height); r++ {
 				copy(next.cells[r*w:r*w+min(w, g.width)], g.cells[r*g.width:r*g.width+min(w, g.width)])
 			}

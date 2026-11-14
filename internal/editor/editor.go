@@ -32,7 +32,7 @@ type peer struct {
 	geometry            [4]int
 	floatRoot           [2]int
 	floatSize           [2]int
-	floatResize         [2]int
+	floatResizes        []floatResize
 }
 type incoming struct {
 	p   *peer
@@ -272,7 +272,7 @@ func (m *manager) handle(e incoming) error {
 		// Keep the read loop's peer as the stable identity.
 		p.block, p.layer, p.primary = target.block, target.layer, target.primary
 		p.bounds, p.geometry, p.floatRoot = target.bounds, target.geometry, target.floatRoot
-		p.floatSize, p.floatResize = target.floatSize, target.floatResize
+		p.floatSize, p.floatResizes = target.floatSize, target.floatResizes
 		m.panes[target.grid] = p
 		m.routePeer(p)
 		if p.ready != nil {
