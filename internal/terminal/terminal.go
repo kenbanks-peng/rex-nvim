@@ -37,7 +37,7 @@ type Message struct {
 
 const (
 	enterModes  = "\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h"
-	leaveModes  = "\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l\x1b[0m\x1b[?25h\x1b[?1049l"
+	leaveModes  = "\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l"
 	escapeDelay = 40 * time.Millisecond
 )
 

@@ -30,11 +30,13 @@ Neovim arguments pass through unchanged. Your normal configuration loads;
 
 - `:split` and `:vsplit` create Rex blocks. Neovim window moves and resize commands
   update the Rex layout.
-- Rex focus and terminal-size changes update Neovim. Closing a Rex block closes
-  its Neovim window; a rejected modified-buffer close recreates the block.
+- Rex focus and tiled terminal-size changes update Neovim. Closing a Rex block
+  closes its Neovim window; a rejected modified-buffer close recreates the block.
 - All Neovim floating windows use Rex floating blocks, including non-focusable
   overlays. They can span the full Rex window canvas, independently of tiled
-  blocks. Non-focusable floats leave keyboard focus in the editor.
+  blocks. Neovim controls their size and position; smaller terminals clip the
+  rendered content without resizing plugin windows. Non-focusable floats leave
+  keyboard focus in the editor.
 - Neovim tab pages switch the windows shown in the existing Rex tab.
 - `:qa` exits the shared editor. Closing its **last tiled Rex block terminates
   the editor, including unsaved changes**. Closing the original block does not

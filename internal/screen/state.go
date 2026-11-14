@@ -10,7 +10,6 @@ import (
 type View struct {
 	Grid, Window, Row, Col, Width, Height int
 	Float, Focusable, Hidden              bool
-	ResizeID                              uint64 // Increases for each grid_resize event.
 }
 
 type cell struct {
@@ -20,7 +19,6 @@ type cell struct {
 type grid struct {
 	width, height int
 	cells         []cell
-	resizeID      uint64
 }
 type placement struct {
 	View
@@ -43,6 +41,8 @@ type State struct {
 	external                                           map[int]bool
 	commandHeight, lastStatus, messageGrid, messageRow int
 	cursorGrid, cursorRow, cursorCol, lastWindow       int
+	cursorModes                                        []int
+	cursorMode                                         int
 }
 
 func New() *State {
@@ -89,7 +89,7 @@ func (s *State) Views() []View {
 		v := p.View
 		v.Row, v.Col, _ = s.origin(id, make(map[int]bool))
 		if g := s.grids[id]; g != nil {
-			v.Width, v.Height, v.ResizeID = g.width, g.height, g.resizeID
+			v.Width, v.Height = g.width, g.height
 		}
 		out = append(out, v)
 	}
@@ -138,9 +138,8 @@ func (s *State) apply(name string, a []any) {
 	switch name {
 	case "grid_resize":
 		w, h := max(0, n(1)), max(0, n(2))
-		next := &grid{width: w, height: h, cells: blank(w * h), resizeID: 1}
+		next := &grid{width: w, height: h, cells: blank(w * h)}
 		if g != nil {
-			next.resizeID = g.resizeID + 1
 			for r := 0; r < min(h, g.height); r++ {
 				copy(next.cells[r*w:r*w+min(w, g.width)], g.cells[r*g.width:r*g.width+min(w, g.width)])
 			}
@@ -218,6 +217,26 @@ func (s *State) apply(name string, a []any) {
 		delete(s.views, id)
 	case "msg_set_pos":
 		s.messageGrid, s.messageRow = id, n(1)
+	case "mode_info_set":
+		s.cursorModes = nil
+		if boolean(at(0)) {
+			for _, raw := range sequence(at(1)) {
+				mode := attributes(raw)
+				style := 2
+				switch mode["cursor_shape"] {
+				case "horizontal":
+					style = 4
+				case "vertical":
+					style = 6
+				}
+				if integer(mode["blinkon"]) > 0 && integer(mode["blinkoff"]) > 0 {
+					style--
+				}
+				s.cursorModes = append(s.cursorModes, style)
+			}
+		}
+	case "mode_change":
+		s.cursorMode = n(1)
 	case "grid_cursor_goto":
 		s.cursorGrid, s.cursorRow, s.cursorCol = id, n(1), n(2)
 		if id != 1 && id != s.messageGrid {

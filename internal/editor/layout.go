@@ -210,9 +210,6 @@ func (m *manager) syncRex() error {
 			}
 		}
 	}
-	if err := m.syncFloatPlacement(view); err != nil {
-		return err
-	}
 	return m.reconcile()
 }
 

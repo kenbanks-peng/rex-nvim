@@ -156,7 +156,12 @@ func (s *State) Render(id, width, height int) string {
 		show = true
 	}
 	if show && cr >= 0 && cr < height && cc >= 0 && cc < width {
-		fmt.Fprintf(&out, "[%d;%dH[?25h", cr+1, cc+1)
+		style := 2
+		if s.cursorMode >= 0 && s.cursorMode < len(s.cursorModes) {
+			style = s.cursorModes[s.cursorMode]
+		}
+		fmt.Fprintf(&out, "\x1b[%d q", style)
+		fmt.Fprintf(&out, "\x1b[%d;%dH\x1b[?25h", cr+1, cc+1)
 	}
 	return out.String()
 }

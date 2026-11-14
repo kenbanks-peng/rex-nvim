@@ -29,10 +29,6 @@ type peer struct {
 	primary             bool
 	broken              bool
 	bounds              [4]float64
-	geometry            [4]int
-	floatRoot           [2]int
-	floatSize           [2]int
-	floatResizes        []floatResize
 }
 type incoming struct {
 	p   *peer
@@ -271,17 +267,11 @@ func (m *manager) handle(e incoming) error {
 		p.width, p.height = e.msg.Width, e.msg.Height
 		// Keep the read loop's peer as the stable identity.
 		p.block, p.layer, p.primary = target.block, target.layer, target.primary
-		p.bounds, p.geometry, p.floatRoot = target.bounds, target.geometry, target.floatRoot
-		p.floatSize, p.floatResizes = target.floatSize, target.floatResizes
+		p.bounds = target.bounds
 		m.panes[target.grid] = p
 		m.routePeer(p)
 		if p.ready != nil {
 			close(p.ready)
-		}
-		if p.layer != "" {
-			if err := m.fitFloat(p); err != nil {
-				return err
-			}
 		}
 		m.draw()
 		return m.fit()
@@ -297,7 +287,8 @@ func (m *manager) handle(e incoming) error {
 	case "resize":
 		p.width, p.height = e.msg.Width, e.msg.Height
 		if p.layer != "" {
-			return m.fitFloat(p)
+			m.draw()
+			return nil
 		}
 		return m.fit()
 	case "focus":

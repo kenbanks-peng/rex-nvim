@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+var ansi = regexp.MustCompile(`\x1b\[[0-9;?]* ?[A-Za-z]`)
 
 func plain(s string) string                { return ansi.ReplaceAllString(s, "") }
 func event(name string, args ...any) []any { return []any{name, args} }
@@ -32,7 +32,7 @@ func TestApplyCallbacksAndLifecycle(t *testing.T) {
 		t.Fatal("nested flush ignored")
 	}
 	views := s.Views()
-	if len(views) != 1 || views[0] != (View{Grid: 2, Window: 45, Row: 1, Col: 3, Width: 4, Height: 2, Focusable: true, ResizeID: 1}) {
+	if len(views) != 1 || views[0] != (View{Grid: 2, Window: 45, Row: 1, Col: 3, Width: 4, Height: 2, Focusable: true}) {
 		t.Fatalf("%+v", views)
 	}
 	views[0].Hidden = true
