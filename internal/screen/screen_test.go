@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-var ansi = regexp.MustCompile(`\x1b\[[0-9;?]* ?[A-Za-z]`)
+var ansi = regexp.MustCompile(`\x1b\[[0-9;:?]* ?[A-Za-z]|\x1b\][^\x1b]*\x1b\\`)
 
 func plain(s string) string                { return ansi.ReplaceAllString(s, "") }
 func event(name string, args ...any) []any { return []any{name, args} }
@@ -123,7 +123,7 @@ func TestHighlightStylesAndDefaults(t *testing.T) {
 	}, map[string]any{}, []any{}))
 	s.Apply(event("grid_line", 2, 0, 0, []any{[]any{"a", 7}, []any{"b", 0}}))
 	frame := s.Render(2, 2, 1)
-	for _, part := range []string{"0;1;3;4;7;9;38;2;170;187;204;48;2;68;85;102;58;2;1;2;3m", "0;38;2;17;34;51;48;2;68;85;102mb"} {
+	for _, part := range []string{"0;1;3;4;7;9;38;2;170;187;204;48;2;68;85;102;58:2::1:2:3m", "0;38;2;17;34;51;48;2;68;85;102mb"} {
 		if !strings.Contains(frame, part) {
 			t.Fatalf("missing %q: %q", part, frame)
 		}

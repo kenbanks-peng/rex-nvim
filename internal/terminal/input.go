@@ -163,8 +163,7 @@ func sequence(body string, final byte) Message {
 		case 'I':
 			return Message{Type: "focus"}
 		case 'O':
-			// Focus loss is intentionally not a focus request.
-			return Message{}
+			return Message{Type: "blur"}
 		case 'Z':
 			return key("Tab", "S-")
 		}
@@ -262,6 +261,10 @@ func (p *inputParser) mouse(body string, final byte) Message {
 	if b&64 != 0 {
 		m.Button = "wheel"
 		m.Action = []string{"up", "down", "left", "right"}[b&3]
+		return m
+	}
+	if b&32 != 0 && b&3 == 3 {
+		m.Button = "move"
 		return m
 	}
 	m.Button = []string{"left", "middle", "right", ""}[b&3]

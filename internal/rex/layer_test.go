@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestRaiseLayer(t *testing.T) {
+	c, read := fake(t, "{}")
+	if err := c.RaiseLayer(context.Background(), "upper", "lower"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"layer_id": "upper", "relative_layer_id": "lower"}
+	if got := apiArgs(t, read, "session.raise_layer"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for _, pair := range [][2]string{{"", "lower"}, {"upper", ""}, {"same", "same"}} {
+		if err := c.RaiseLayer(context.Background(), pair[0], pair[1]); err == nil {
+			t.Fatalf("invalid pair: %v", pair)
+		}
+	}
+}
+
 func TestResizeLayer(t *testing.T) {
 	for _, bounds := range [][4]float64{{0, 0, 1, 1}, {.2, .15, .5, .6}} {
 		c, read := fake(t, "{}")

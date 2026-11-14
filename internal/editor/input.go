@@ -4,18 +4,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kenbanks-peng/rex-nvim/internal/screen"
 	"github.com/neovim/go-client/nvim"
 )
 
 type inputRoute struct {
-	grid, window int
-	passive      bool
+	grid, window  int
+	width, height int
+	passive       bool
 }
 
 func (m *manager) routePeer(p *peer) {
 	for _, v := range m.views() {
 		if v.Grid == p.grid {
-			p.route.Store(&inputRoute{grid: p.grid, window: v.Window, passive: v.Float && !v.Focusable})
+			p.route.Store(&inputRoute{grid: p.grid, window: v.Window, width: p.width, height: p.height, passive: v.Float && !v.Focusable})
 			return
 		}
 	}
@@ -41,7 +43,22 @@ func (m *manager) sendKeys() {
 		if route == nil {
 			continue
 		}
-		if !route.passive && m.activeGrid.Load() != int64(route.grid) && e.msg.Type != "mouse" {
+		blocking := m.blockingInput()
+		m.mu.Lock()
+		historyConsumed := false
+		if e.msg.Type == "input" && !blocking {
+			historyConsumed = m.state.MessageInput(e.msg.Keys)
+		}
+		commandActive := blocking || m.state.CommandInputActive()
+		m.mu.Unlock()
+		if historyConsumed {
+			select {
+			case m.paint <- struct{}{}:
+			default:
+			}
+			continue
+		}
+		if !commandActive && !route.passive && m.activeGrid.Load() != int64(route.grid) && e.msg.Type != "mouse" {
 			previous := m.activeGrid.Swap(int64(route.grid))
 			queued, err := m.pumpOperation(func() error { return m.nv.SetCurrentWindow(nvim.Window(route.window)) })
 			if err == nil {
@@ -49,6 +66,20 @@ func (m *manager) sendKeys() {
 				pending = append(append([]incoming{e}, queued...), pending...)
 			} else {
 				m.activeGrid.CompareAndSwap(int64(route.grid), previous)
+				pending = append(queued, pending...)
+			}
+			continue
+		}
+		if target, consumed := m.navigation(e); !commandActive && consumed {
+			if target.Handle > 0 && e.msg.Button == "left" && e.msg.Action == "press" {
+				queued, _ := m.pumpOperation(func() error {
+					if target.Buffer {
+						if err := m.nv.SetCurrentWindow(nvim.Window(route.window)); err != nil {
+							return err
+						}
+					}
+					return m.selectNavigation(target)
+				})
 				pending = append(queued, pending...)
 			}
 			continue
@@ -107,6 +138,23 @@ func (m *manager) deliverFast(e incoming) error {
 		text = strings.ReplaceAll(text, "\n", "<CR>")
 		return m.typeKeys(text)
 	case "mouse":
+		if consumed, err := m.popupInput(e); consumed || err != nil {
+			return err
+		}
+		m.mu.Lock()
+		enabled := m.state.MouseEnabled() && !m.state.CommandInputActive()
+		_, chrome := m.state.TablineTarget(route.grid, route.width, route.height, msg.Row, msg.Col)
+		external := m.state.ExternalTabline()
+		m.mu.Unlock()
+		if !enabled {
+			return nil
+		}
+		if chrome {
+			if external {
+				return nil
+			}
+			return m.nv.InputMouse(msg.Button, msg.Action, msg.Modifier, 1, 0, msg.Col)
+		}
 		return m.nv.InputMouse(msg.Button, msg.Action, msg.Modifier, route.grid, msg.Row, msg.Col)
 	}
 	return nil
@@ -127,4 +175,36 @@ func (m *manager) typeKeys(keys string) error {
 		}
 	}
 	return nil
+}
+
+// navigation only intercepts external chrome. Selection is non-fast and must
+// use the same input pump as focus/paste, since autocommands can prompt.
+func (m *manager) navigation(e incoming) (screen.TablineTarget, bool) {
+	r := e.p.route.Load()
+	if r == nil || e.msg.Type != "mouse" {
+		return screen.TablineTarget{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.state.ExternalTabline() || !m.state.MouseEnabled() {
+		return screen.TablineTarget{}, false
+	}
+	return m.state.TablineTarget(r.grid, r.width, r.height, e.msg.Row, e.msg.Col)
+}
+func (m *manager) selectNavigation(target screen.TablineTarget) error {
+	if target.Buffer {
+		return m.nv.SetCurrentBuffer(nvim.Buffer(target.Handle))
+	}
+	return m.nv.SetCurrentTabpage(nvim.Tabpage(target.Handle))
+}
+
+// UI mode_change describes cursor appearance, not all blocking input states
+// (hit-enter can retain the normal cursor). nvim_get_mode is a fast RPC and
+// remains callable while Neovim is waiting for a prompt answer.
+func (m *manager) blockingInput() bool {
+	if m.nv == nil {
+		return false
+	}
+	mode, err := m.nv.Mode()
+	return err == nil && mode.Blocking
 }

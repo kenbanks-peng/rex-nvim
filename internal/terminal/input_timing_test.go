@@ -90,7 +90,7 @@ func TestInputTimeouts(t *testing.T) {
 func TestFocusWireFormat(t *testing.T) {
 	var parser inputParser
 	events := parser.feed([]byte("\x1b[I\x1b[O"))
-	if len(events) != 1 {
+	if len(events) != 2 || events[1].Type != "blur" {
 		t.Fatalf("focus/blur generated %#v", events)
 	}
 	events[0].Grid = 7

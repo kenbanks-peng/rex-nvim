@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,16 +20,20 @@ import (
 )
 
 type peer struct {
-	ready               chan struct{}
-	route               atomic.Pointer[inputRoute]
-	grid, width, height int
-	block, layer        string
-	conn                net.Conn
-	frames              chan string
-	last                string
-	primary             bool
-	broken              bool
-	bounds              [4]float64
+	ready                    chan struct{}
+	route                    atomic.Pointer[inputRoute]
+	grid, width, height      int
+	block, layer             string
+	conn                     net.Conn
+	frames                   chan string
+	host                     chan terminal.Message
+	control                  chan terminal.Message
+	suspended                bool
+	hostTitle, hostDirectory *string
+	last                     string
+	primary                  bool
+	broken                   bool
+	bounds                   [4]float64
 }
 type incoming struct {
 	p   *peer
@@ -36,6 +41,7 @@ type incoming struct {
 	err error
 }
 type manager struct {
+	paint                       chan struct{}
 	ctx                         context.Context
 	nv                          *nvim.Nvim
 	rex                         *rex.Client
@@ -49,8 +55,13 @@ type manager struct {
 	socket, executable, initial string
 	rootW, rootH                int
 	lastFocus                   int
+	uiFocusKnown, uiFocused     bool
+	focusBlock, rexFocusBlock   string
+	blurAt                      time.Time
 	layoutShape                 string
 	fittedLayout                *layoutNode
+	popupGeometry               screen.PopupGeometry
+	popupKnown                  bool
 }
 
 // Serve owns the shared editor independently of every renderer's terminal.
@@ -76,6 +87,13 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 		return err
 	}
 	m := &manager{ctx: ctx, rex: rex.New(session), state: screen.New(), wake: make(chan struct{}, 1), input: make(chan incoming, 256), panes: map[int]*peer{}, socket: socket, executable: exe, initial: block, rootW: w, rootH: h}
+	m.state.OnIgnoredEvent = func(name string, suppressed bool) {
+		if suppressed {
+			log.Print("Neovim redraw: further ignored-event diagnostics suppressed")
+			return
+		}
+		log.Printf("Neovim redraw: ignoring unhandled event %q (see UI capability inventory)", name)
+	}
 	childArgs := append([]string{"--embed", "--headless", "--cmd", "let g:rex_nvim = v:true"}, args...)
 	nv, err := nvim.NewChildProcess(nvim.ChildProcessContext(ctx), nvim.ChildProcessArgs(childArgs...), nvim.ChildProcessServe(false))
 	if err != nil {
@@ -85,7 +103,7 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 	defer nv.Close()
 	if err = nv.RegisterHandler("redraw", func(updates ...[]any) {
 		m.mu.Lock()
-		flushed := m.state.Apply(updates...)
+		flushed := m.state.Apply(updates...) || m.state.HostPending()
 		m.mu.Unlock()
 		if flushed {
 			select {
@@ -101,13 +119,32 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 	if err = nv.ExecLua(configure, nil); err != nil {
 		return err
 	}
-	if err = nv.AttachUI(w, h, map[string]any{"rgb": true, "ext_multigrid": true, "ext_linegrid": true}); err != nil {
+	externalTabline := os.Getenv("REX_NVIM_TABLINE") != "grid"
+	m.state.SetExternalTabline(externalTabline)
+	externalPopupmenu := os.Getenv("REX_NVIM_POPUPMENU") != "grid"
+	m.state.SetExternalPopupmenu(externalPopupmenu)
+	externalCmdline := os.Getenv("REX_NVIM_CMDLINE") != "grid"
+	m.state.SetExternalCmdline(externalCmdline)
+	externalMessages := externalCmdline && os.Getenv("REX_NVIM_MESSAGES") != "grid"
+	m.state.SetExternalMessages(externalMessages)
+	if err = nv.AttachUI(w, h, screen.UIOptions(externalTabline, externalPopupmenu, externalCmdline, externalMessages)); err != nil {
 		return err
 	}
+	if externalMessages {
+		if err = nv.ExecLua("vim.g.rex_nvim_cmdheight=vim.o.cmdheight", nil); err != nil {
+			return err
+		}
+	}
+	m.paint = make(chan struct{}, 1)
 	m.keys = make(chan incoming, 256)
 	go m.sendKeys()
 	go m.accept(listener)
 	defer func() {
+		// Detach while RPC is live. On failure/hang, cancellation and Close
+		// release the UI and owned child; renderer sockets are always closed.
+		if err := detachUI(nv.DetachUI, 250*time.Millisecond); err != nil {
+			log.Printf("Neovim UI detach: %v", err)
+		}
 		cancel()
 		listener.Close()
 		for _, p := range m.panes {
@@ -130,6 +167,8 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	focusTicker := time.NewTicker(25 * time.Millisecond)
+	defer focusTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -146,11 +185,17 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 				}
 				return err
 			}
+		case <-m.paint:
+			m.draw()
 		case <-m.wake:
 			if err = m.reconcile(); err != nil && !rex.IsRecoverable(err) {
 				return err
 			}
 			m.draw()
+		case <-focusTicker.C:
+			if err = m.flushBlur(time.Now()); err != nil && !rex.IsRecoverable(err) {
+				return err
+			}
 		case <-ticker.C:
 			if err = m.syncRex(); err != nil && !rex.IsRecoverable(err) {
 				if errors.Is(err, errNoPanes) {
@@ -169,7 +214,7 @@ func (m *manager) accept(l net.Listener) {
 			return
 		}
 		go func() {
-			p := &peer{conn: conn, frames: make(chan string, 1), ready: make(chan struct{})}
+			p := &peer{conn: conn, frames: make(chan string, 1), host: make(chan terminal.Message, 1), control: make(chan terminal.Message, 1), ready: make(chan struct{})}
 			defer conn.Close()
 			d := json.NewDecoder(io.LimitReader(conn, 1<<40))
 			var hello terminal.Message
@@ -192,11 +237,29 @@ func (m *manager) accept(l net.Listener) {
 			frames := p.frames
 			go func() {
 				e := json.NewEncoder(conn)
+				host := p.host
 				for {
 					select {
 					case frame := <-frames:
 						conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 						if e.Encode(terminal.Message{Type: "frame", Frame: frame}) != nil {
+							conn.Close()
+							return
+						}
+					case msg := <-p.control:
+						if msg.Type == "suspend" {
+							frames, host = nil, nil
+							conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+							if e.Encode(terminal.Message{Type: "suspended"}) != nil {
+								conn.Close()
+								return
+							}
+						} else {
+							frames, host = p.frames, p.host
+						}
+					case msg := <-host:
+						conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+						if e.Encode(msg) != nil {
 							conn.Close()
 							return
 						}
@@ -232,7 +295,7 @@ func (m *manager) handle(e incoming) error {
 		target := m.panes[p.grid]
 		if p.grid == 0 {
 			for _, v := range m.views() {
-				if !v.Float && !v.Hidden {
+				if !v.Float && !v.External && !v.Hidden {
 					target = m.panes[v.Grid]
 					break
 				}
@@ -274,7 +337,7 @@ func (m *manager) handle(e incoming) error {
 			close(p.ready)
 		}
 		m.draw()
-		return m.fit()
+		return m.fitRenderer(p)
 	}
 	target := m.panes[p.grid]
 	if target != p {
@@ -284,20 +347,51 @@ func (m *manager) handle(e incoming) error {
 		return m.transportLost(p)
 	}
 	switch e.msg.Type {
+	case "suspend", "resume":
+		p.suspended = e.msg.Type == "suspend"
+		select {
+		case p.control <- e.msg:
+		case <-m.ctx.Done():
+			return m.ctx.Err()
+		}
+		if !p.suspended {
+			p.last = ""
+			m.draw()
+		}
+		return nil
 	case "resize":
 		p.width, p.height = e.msg.Width, e.msg.Height
+		m.routePeer(p)
+		if m.isExternal(p.grid) {
+			return m.fitRenderer(p)
+		}
 		if p.layer != "" {
 			m.draw()
 			return nil
 		}
 		return m.fit()
 	case "focus":
+		m.focusBlock, m.rexFocusBlock = p.block, p.block
+		m.blurAt = time.Time{}
+		if err := m.setUIFocus(true); err != nil {
+			return err
+		}
 		return m.focus(p.grid)
+	case "blur":
+		if m.focusBlock == "" || m.focusBlock == p.block {
+			m.blurAt = time.Now().Add(75 * time.Millisecond)
+		}
 	}
 	return nil
 }
 func (m *manager) views() []screen.View { m.mu.Lock(); defer m.mu.Unlock(); return m.state.Views() }
 func (m *manager) focus(grid int) error {
+	m.mu.Lock()
+	commandActive := m.state.CommandInputActive()
+	m.mu.Unlock()
+	if commandActive || m.blockingInput() {
+		return nil
+	}
 	if int64(grid) == m.activeGrid.Load() {
 		return nil
 	}
@@ -340,15 +434,21 @@ func (m *manager) closeWindow(grid int) error {
 	return nil
 }
 func (m *manager) draw() {
+	m.drawFrames()
+	m.reportPopupGeometry()
+}
+
+func (m *manager) drawFrames() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.drawHost()
 	external := map[int]bool{}
 	for grid := range m.panes {
 		external[grid] = true
 	}
 	m.state.SetExternalGrids(external)
 	for grid, p := range m.panes {
-		if p.frames == nil || p.width < 1 || p.height < 1 {
+		if p.suspended || p.frames == nil || p.width < 1 || p.height < 1 {
 			continue
 		}
 		frame := m.state.Render(grid, p.width, p.height)

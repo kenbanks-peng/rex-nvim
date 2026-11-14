@@ -28,7 +28,7 @@ func TestInputParser(t *testing.T) {
 		{"modifiers", "\x1b[1;2A\x1b[1;5D\x1b[3;3~\x1b[1;8P\x1b[Z", inputs("<S-Up>", "<C-Left>", "<A-Del>", "<S-C-A-F1>", "<S-Tab>")},
 		{"alt", "\x1bx\x1b<\x1bé\x1b\x03", inputs("<A-x>", "<A-LT>", "<A-é>", "<A-C-C>")},
 		{"extended keys", "\x1b[97;5u\x1b[27;3;60~", inputs("<C-a>", "<A-LT>")},
-		{"focus", "\x1b[I\x1b[O", []Message{{Type: "focus"}}},
+		{"focus", "\x1b[I\x1b[O", []Message{{Type: "focus"}, {Type: "blur"}}},
 		{"paste", pasteStart + "a<\r\n🙂\x1b[A" + pasteEnd + "x", []Message{{Type: "paste", Keys: "a<\r\n🙂\x1b[A"}, {Type: "input", Keys: "x"}}},
 		{"empty paste", pasteStart + pasteEnd, []Message{{Type: "paste"}}},
 		{"consecutive paste", pasteStart + "a" + pasteEnd + pasteStart + "b" + pasteEnd, []Message{{Type: "paste", Keys: "a"}, {Type: "paste", Keys: "b"}}},
@@ -111,7 +111,7 @@ func TestMouse(t *testing.T) {
 	data := "\x1b[<0;1;1M\x1b[<32;5;3M\x1b[<0;5;3m" +
 		"\x1b[<1;2;4M\x1b[<1;2;4m\x1b[<2;8;9M\x1b[<3;8;9M" +
 		"\x1b[<64;1;1M\x1b[<65;1;1M\x1b[<66;1;1M\x1b[<67;1;1M" +
-		"\x1b[<28;2;2M"
+		"\x1b[<28;2;2M\x1b[<35;3;4M"
 	want := []Message{
 		{Type: "mouse", Button: "left", Action: "press"},
 		{Type: "mouse", Button: "left", Action: "drag", Row: 2, Col: 4},
@@ -125,6 +125,7 @@ func TestMouse(t *testing.T) {
 		{Type: "mouse", Button: "wheel", Action: "left"},
 		{Type: "mouse", Button: "wheel", Action: "right"},
 		{Type: "mouse", Button: "left", Action: "press", Modifier: "S-C-A-", Row: 1, Col: 1},
+		{Type: "mouse", Button: "move", Row: 3, Col: 2},
 	}
 	for split := 0; split <= len(data); split++ {
 		var p inputParser
@@ -134,7 +135,7 @@ func TestMouse(t *testing.T) {
 			t.Fatalf("split %d: got %#v", split, got)
 		}
 	}
-	for _, bad := range []string{"\x1b[<0;0;1M", "\x1b[<;1;1M", "\x1b[<128;1;1M", "\x1b[<35;1;1M"} {
+	for _, bad := range []string{"\x1b[<0;0;1M", "\x1b[<;1;1M", "\x1b[<128;1;1M"} {
 		var p inputParser
 		if got := p.feed([]byte(bad)); len(got) != 0 {
 			t.Fatalf("invalid mouse %q: %#v", bad, got)

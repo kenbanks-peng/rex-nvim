@@ -10,10 +10,19 @@ import (
 	"os/exec"
 	"os/signal"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestExitRestoresCursorColorBeforeLeavingAlternateScreen(t *testing.T) {
+	reset := strings.Index(leaveModes, "\x1b]112\x1b\\")
+	leave := strings.Index(leaveModes, "\x1b[?1049l")
+	if reset < 0 || reset > leave {
+		t.Fatalf("cursor color leaks into shell: %q", leaveModes)
+	}
+}
 
 type frameWriter chan string
 
@@ -67,6 +76,18 @@ func TestSession(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("frame not rendered")
 	}
+	title := "host only"
+	if err := encoder.Encode(Message{Type: "host", Title: &title, Bell: true}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-frames:
+		if got != "\x1b]2;host only\x1b\\\a" {
+			t.Fatalf("host-only message not delivered: %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("host-only message waited for a frame")
+	}
 	if _, err := keyboard.WriteString("\x1b[A" + pasteStart + "<raw>\n" + pasteEnd + "\x1b[I"); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +101,10 @@ func TestSession(t *testing.T) {
 	resizes <- syscall.SIGWINCH
 	read(Message{Type: "resize", Grid: 7, Width: 80, Height: 24})
 	select {
-	case <-frames:
+	case got := <-frames:
+		if got != "\x1b[Hscreen" {
+			t.Fatalf("resize replayed host effects: %q", got)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("resize did not redraw")
 	}
@@ -148,7 +172,7 @@ func TestRunProcess(t *testing.T) {
 	if socket == "" {
 		return
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	err := Run(ctx, socket, 9)
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -175,9 +199,9 @@ func TestRunRestoresTTY(t *testing.T) {
 }
 
 const ptyTest = `
-import fcntl, json, os, pty, signal, socket, struct, subprocess, sys, tempfile, termios
+import fcntl, json, os, pty, signal, socket, struct, subprocess, sys, tempfile, termios, time
 
-for shutdown in ("cancel", "disconnect", "bad-json"):
+for shutdown in ("cancel", "hangup", "disconnect", "bad-json", "suspend", "suspend-disconnect"):
     with tempfile.TemporaryDirectory(prefix="rex-tty-", dir="/tmp") as directory:
         path = directory + "/s"
         listener = socket.socket(socket.AF_UNIX)
@@ -204,9 +228,38 @@ for shutdown in ("cancel", "disconnect", "bad-json"):
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
             proc.send_signal(signal.SIGWINCH)
             assert json.loads(reader.readline()) == {"type":"resize", "grid":9, "width":100, "height":30}
-            if shutdown == "cancel":
+            if shutdown.startswith("suspend"):
+                proc.send_signal(signal.SIGTSTP)
+                assert json.loads(reader.readline()) == {"type":"suspend", "grid":9}
+                conn.sendall(b'{"type":"suspended"}\n')
+                deadline = time.monotonic() + 5
+                while True:
+                    pid, status = os.waitpid(proc.pid, os.WNOHANG | os.WUNTRACED)
+                    if pid:
+                        assert os.WIFSTOPPED(status), status
+                        break
+                    assert time.monotonic() < deadline, "renderer did not stop"
+                    time.sleep(.01)
+                paused = termios.tcgetattr(slave)
+                paused[3] &= ~termios.PENDIN
+                before[3] &= ~termios.PENDIN
+                assert paused == before, ("suspended raw tty", paused, before)
+                fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+                if shutdown == "suspend-disconnect":
+                    conn.shutdown(socket.SHUT_RDWR)
+                proc.send_signal(signal.SIGCONT)
+                if shutdown == "suspend":
+                    assert json.loads(reader.readline()) == {"type":"resume", "grid":9}
+                    assert json.loads(reader.readline()) == {"type":"resize", "grid":9, "width":120, "height":40}
+                    assert not termios.tcgetattr(slave)[3] & termios.ICANON
+                    os.write(master, b"z")
+                    assert json.loads(reader.readline()) == {"type":"input", "grid":9, "keys":"z"}
+                    proc.send_signal(signal.SIGTERM)
+            elif shutdown == "cancel":
                 os.write(master, b"\x1b[200~unfinished")
                 proc.send_signal(signal.SIGTERM)
+            elif shutdown == "hangup":
+                proc.send_signal(signal.SIGHUP)
             elif shutdown == "disconnect":
                 conn.shutdown(socket.SHUT_RDWR)
             else:
@@ -229,7 +282,8 @@ for shutdown in ("cancel", "disconnect", "bad-json"):
             assert sys.argv[2].encode() in output, repr(output)
             assert sys.argv[3].encode() in output, repr(output)
             assert b"FRAME" in output, repr(output)
-            assert (code == 0) == (shutdown != "bad-json"), (code, proc.stderr.read())
+            if shutdown != "suspend-disconnect":
+                assert (code == 0) == (shutdown != "bad-json"), (code, proc.stderr.read())
         finally:
             if proc.poll() is None:
                 proc.kill()

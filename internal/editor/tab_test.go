@@ -10,7 +10,7 @@ import (
 )
 
 func TestTabRedraw(t *testing.T) {
-	nv, err := nvim.NewChildProcess(nvim.ChildProcessServe(false), nvim.ChildProcessArgs("--embed", "--headless", "--clean"))
+	nv, err := nvim.NewChildProcess(nvim.ChildProcessServe(false), nvim.ChildProcessArgs("--embed", "--headless", "--clean", "-n"))
 	if err != nil {
 		t.Skip(err)
 	}

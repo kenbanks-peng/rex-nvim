@@ -39,7 +39,7 @@ func (m *manager) reconcile() error {
 	if primary != nil {
 		if _, ok := live[primary.grid]; !ok {
 			for _, v := range views {
-				if v.Hidden || v.Float {
+				if v.Hidden || v.Float || v.External {
 					continue
 				}
 				if existing := m.panes[v.Grid]; existing != nil && !existing.primary {
@@ -76,7 +76,7 @@ func (m *manager) reconcile() error {
 		if v.Hidden || m.panes[v.Grid] != nil {
 			continue
 		}
-		if v.Float {
+		if v.Float || v.External {
 			continue
 		}
 		if len(m.panes) == 0 || (len(m.panes) == 1 && m.panes[0] != nil) {
@@ -100,6 +100,9 @@ func (m *manager) reconcile() error {
 		}
 		m.panes[v.Grid] = &peer{grid: v.Grid, block: block}
 	}
+	if err := m.syncExternals(views); err != nil {
+		return err
+	}
 	if err := m.syncFloats(views); err != nil {
 		return err
 	}
@@ -109,7 +112,7 @@ func (m *manager) reconcile() error {
 	m.mu.Lock()
 	cursor := m.state.CursorGrid()
 	m.mu.Unlock()
-	if cursor != m.lastFocus {
+	if cursor != m.lastFocus && (!m.uiFocusKnown || m.uiFocused) {
 		if p := m.panes[cursor]; p != nil && p.block != "" {
 			if err := m.rex.Focus(m.ctx, p.block); err != nil {
 				// The block may have just been closed in Rex. The next snapshot reconciles it.
@@ -142,7 +145,7 @@ func placement(v screen.View, views []screen.View, panes map[int]*peer) (*peer, 
 	distance := math.MaxFloat64
 	for _, a := range views {
 		p := panes[a.Grid]
-		if p == nil || a.Float || a.Hidden || a.Grid == v.Grid {
+		if p == nil || a.Float || a.External || a.Hidden || a.Grid == v.Grid {
 			continue
 		}
 		dx, dy := v.Col-a.Col, v.Row-a.Row
@@ -191,6 +194,9 @@ func (m *manager) syncRex() error {
 			focused = w.Focused
 		}
 	}
+	if err := m.observeRexFocus(focused); err != nil {
+		return err
+	}
 	for grid, p := range m.panes {
 		if !present[p.block] {
 			if err := m.disconnected(p); err != nil {
@@ -233,40 +239,54 @@ local function measure(node)
 end
 local w,h=measure(vim.fn.winlayout())
 local tabline = (vim.o.showtabline==2 or (vim.o.showtabline==1 and #vim.api.nvim_list_tabpages()>1)) and 1 or 0
-return {w,h+vim.g.rex_nvim_cmdheight+tabline,vim.g.rex_nvim_cmdheight,vim.o.laststatus}
+for _,ui in ipairs(vim.api.nvim_list_uis()) do if ui.ext_tabline then tabline=0;break end end
+return {w,h+vim.g.rex_nvim_cmdheight+tabline,vim.g.rex_nvim_cmdheight,vim.o.laststatus,#vim.api.nvim_list_tabpages()}
 `
 
 func (m *manager) fit() error {
+	m.mu.Lock()
+	gridCommand := m.state.GridCommandActive()
+	m.mu.Unlock()
+	// Native window fitting clears Neovim's grid command line during entry.
+	// Keep clipping the existing grids until entry ends, then fit on that redraw.
+	if gridCommand || m.blockingInput() {
+		return nil
+	}
 	var sizes [][]int
 	for _, v := range m.views() {
 		p := m.panes[v.Grid]
-		if p == nil || p.width < 1 || p.height < 1 || v.Hidden || v.Float {
+		if p == nil || p.width < 1 || p.height < 1 || v.Hidden || v.Float || v.External {
 			continue
 		}
-		sizes = append(sizes, []int{v.Window, p.width, p.height})
+		m.mu.Lock()
+		rows := m.state.TablineRows(v.Grid, p.height)
+		m.mu.Unlock()
+		sizes = append(sizes, []int{v.Window, p.width, p.height - rows})
 	}
 	if len(sizes) == 0 {
 		return nil
 	}
 	var size []int
-	if err := m.nv.ExecLua(measureLayout, &size, sizes); err != nil {
+	if err := m.uiOperation(func() error { return m.nv.ExecLua(measureLayout, &size, sizes) }); err != nil {
 		return err
 	}
-	if len(size) != 4 {
+	if len(size) != 5 {
 		return fmt.Errorf("invalid Neovim layout dimensions")
 	}
 	m.mu.Lock()
 	m.state.SetCommandHeight(size[2])
 	m.state.SetLastStatus(size[3])
+	m.state.SetTabCount(size[4])
 	m.mu.Unlock()
 	w, h := max(12, size[0]), max(3, size[1])
 	if w != m.rootW || h != m.rootH {
-		if err := m.nv.TryResizeUI(w, h); err != nil {
+		if err := m.uiOperation(func() error { return m.nv.TryResizeUI(w, h) }); err != nil {
 			return err
 		}
 		m.rootW, m.rootH = w, h
 	}
-	if err := m.nv.ExecLua(`
+	if err := m.uiOperation(func() error {
+		return m.nv.ExecLua(`
  vim.g.rex_nvim_fitting = true
  for _,s in ipairs(...) do
   if vim.api.nvim_win_is_valid(s[1]) then
@@ -275,9 +295,10 @@ func (m *manager) fit() error {
    if vim.api.nvim_win_get_height(s[1])~=h then pcall(vim.api.nvim_win_set_height,s[1],h) end
   end
  end
- vim.o.cmdheight = vim.g.rex_nvim_cmdheight
+ if vim.o.cmdheight ~= vim.g.rex_nvim_cmdheight then vim.o.cmdheight = vim.g.rex_nvim_cmdheight end
  vim.g.rex_nvim_fitting = false
- `, nil, sizes); err != nil {
+ `, nil, sizes)
+	}); err != nil {
 		return err
 	}
 	var err error

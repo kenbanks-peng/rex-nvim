@@ -23,6 +23,34 @@ func (m *manager) transportLost(p *peer) error {
 	return m.disconnected(p)
 }
 func (m *manager) replaceRenderer(p *peer) error {
+	if p.layer != "" && m.isExternal(p.grid) {
+		view, err := m.rex.View(m.ctx)
+		if err != nil {
+			return err
+		}
+		window, _ := m.floatSpace(view)
+		if window == "" {
+			return nil
+		}
+		bounds := p.bounds
+		for _, w := range view.Windows {
+			for _, layer := range w.Layers {
+				if layer.ID == p.layer {
+					bounds = layer.Bounds
+				}
+			}
+		}
+		block, layer, err := m.rex.Float(m.ctx, window, bounds, m.command(p.grid))
+		if err != nil {
+			return err
+		}
+		if err := m.rex.CloseLayer(m.ctx, p.layer); err != nil {
+			_ = m.rex.CloseLayer(m.ctx, layer)
+			return err
+		}
+		m.panes[p.grid] = &peer{grid: p.grid, block: block, layer: layer, bounds: bounds}
+		return nil
+	}
 	if p.layer != "" {
 		// Recreate the float on the next reconciliation, retaining its Neovim window.
 		if err := m.rex.CloseLayer(m.ctx, p.layer); err != nil {

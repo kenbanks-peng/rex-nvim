@@ -249,6 +249,14 @@ func (c *Client) ResizeLayer(ctx context.Context, layer string, bounds [4]float6
 	return c.call(ctx, "session.resize_layer", map[string]any{"layer_id": layer, "bounds": bounds}, nil)
 }
 
+// RaiseLayer places a float directly above another float without changing focus.
+func (c *Client) RaiseLayer(ctx context.Context, layer, relative string) error {
+	if layer == "" || relative == "" || layer == relative {
+		return errors.New("rex raise layer: distinct layer and relative layer are required")
+	}
+	return c.call(ctx, "session.raise_layer", map[string]any{"layer_id": layer, "relative_layer_id": relative}, nil)
+}
+
 func (c *Client) CloseLayer(ctx context.Context, layer string) error {
 	if layer == "" {
 		return errors.New("rex close layer: layer is required")

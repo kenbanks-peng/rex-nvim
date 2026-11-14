@@ -34,7 +34,7 @@ return read(vim.fn.winlayout())
 
 func (m *manager) nativeLayout() (*layoutNode, error) {
 	var node layoutNode
-	err := m.nv.ExecLua(readLayout, &node)
+	err := m.uiOperation(func() error { return m.nv.ExecLua(readLayout, &node) })
 	return &node, err
 }
 func (n *layoutNode) shape() string {
@@ -78,7 +78,7 @@ func (m *manager) syncTopology() error {
 	}
 	blocks := map[int]string{}
 	for _, v := range m.views() {
-		if p := m.panes[v.Grid]; p != nil && !v.Float && !v.Hidden {
+		if p := m.panes[v.Grid]; p != nil && !v.Float && !v.External && !v.Hidden {
 			blocks[v.Window] = p.block
 		}
 	}

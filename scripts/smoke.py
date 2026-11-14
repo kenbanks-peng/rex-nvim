@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Exercise a disposable Rex session using real Neovim and renderer processes."""
 
+import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -47,7 +49,7 @@ def main():
                 "/usr/bin/env",
                 f"PATH={os.environ['PATH']}",
                 str(ROOT / "build/rex-nvim"),
-                "--clean",
+                "--clean", "-n",
                 "--listen",
                 socket,
             )
@@ -71,6 +73,19 @@ def main():
 
         try:
             wait(lambda: expr("getpid()"), "Neovim startup")
+            ui = json.loads(expr("json_encode(nvim_list_uis()[0])"))
+            cmdline = os.environ.get("REX_NVIM_CMDLINE") != "grid"
+            expected = {
+                "rgb": True, "ext_linegrid": True, "ext_multigrid": True,
+                "ext_tabline": os.environ.get("REX_NVIM_TABLINE") != "grid",
+                "ext_popupmenu": os.environ.get("REX_NVIM_POPUPMENU") != "grid",
+                "ext_cmdline": cmdline,
+                "ext_messages": cmdline and os.environ.get("REX_NVIM_MESSAGES") != "grid",
+                "ext_wildmenu": False, "ext_hlstate": False, "ext_termcolors": False,
+            }
+            for option, enabled in expected.items():
+                assert ui.get(option, False) == enabled, (option, ui, expected)
+            print("Negotiated UI:", json.dumps(expected, sort_keys=True), flush=True)
             expr("setline(1, 'REX_SHARED_BUFFER')")
             wait(lambda: "REX_SHARED_BUFFER" in capture(initial), "initial rendering")
             expr('execute("vsplit")')
@@ -284,5 +299,33 @@ def main():
             run("rex", "kill", session)
 
 
+def protocol_suite():
+    """Run all host regressions serially; each owns and cleans its own session."""
+    environment = os.environ.copy()
+    # Do not let caller preferences silently remove coverage from another check.
+    for widget in ("TABLINE", "POPUPMENU", "CMDLINE", "MESSAGES"):
+        environment[f"REX_NVIM_{widget}"] = "external"
+    for script in ("smoke", "tabline", "popupmenu", "cmdline", "messages",
+                   "external", "fidelity", "host_events", "lifecycle"):
+        print(f"CHECK: {script}", flush=True)
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / f"{script}.py")],
+            cwd=ROOT, env=environment, check=True, timeout=240,
+        )
+    environment["REX_NVIM_HOST_TEST"] = "1"
+    subprocess.run(
+        ["go", "test", "./internal/screen", "-run", "TestRex", "-count=1", "-v"],
+        cwd=ROOT, env=environment, check=True, timeout=120,
+    )
+    print("PASS: complete UI protocol host suite", flush=True)
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--protocol", action="store_true",
+                        help="run all capability host checks, including grid fallbacks")
+    args = parser.parse_args()
+    if args.protocol:
+        protocol_suite()
+    else:
+        main()

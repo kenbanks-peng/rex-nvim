@@ -18,7 +18,7 @@ func TestPopupsUseFullEditorCanvas(t *testing.T) {
 			t.Run(split+"/"+anchor, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				nv, err := nvim.NewChildProcess(nvim.ChildProcessContext(ctx), nvim.ChildProcessArgs("--embed", "--headless", "--clean"))
+				nv, err := nvim.NewChildProcess(nvim.ChildProcessContext(ctx), nvim.ChildProcessArgs("--embed", "--headless", "--clean", "-n"))
 				if err != nil {
 					t.Fatal(err)
 				}
