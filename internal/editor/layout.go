@@ -19,7 +19,7 @@ func (m *manager) reconcile() error {
 		return err
 	}
 	if mode.Blocking {
-		return nil
+		return m.syncFloatingPresentation()
 	}
 	views := m.views()
 	live := map[int]screen.View{}
@@ -220,14 +220,14 @@ func (m *manager) syncRex() error {
 }
 
 const measureLayout = `
-local sizes = ...
+local sizes, windowUI = ...
 local bywin = {}
 for _,s in ipairs(sizes) do bywin[s[1]] = s end
 local function measure(node)
  if node[1] == 'leaf' then
   local s=bywin[node[2]]
   if s then return s[2],s[3] end
-  return vim.api.nvim_win_get_width(node[2]),vim.api.nvim_win_get_height(node[2])+1
+  return vim.api.nvim_win_get_width(node[2]),vim.api.nvim_win_get_height(node[2])+(vim.fn.getwininfo(node[2])[1].winbar or 0)+1
  end
  local w,h=0,0
  for i,child in ipairs(node[2]) do
@@ -240,7 +240,12 @@ end
 local w,h=measure(vim.fn.winlayout())
 local tabline = (vim.o.showtabline==2 or (vim.o.showtabline==1 and #vim.api.nvim_list_tabpages()>1)) and 1 or 0
 for _,ui in ipairs(vim.api.nvim_list_uis()) do if ui.ext_tabline then tabline=0;break end end
-return {w,h+vim.g.rex_nvim_cmdheight+tabline,vim.g.rex_nvim_cmdheight,vim.o.laststatus,#vim.api.nvim_list_tabpages()}
+local result = {w,h+(windowUI and 0 or vim.g.rex_nvim_cmdheight+tabline),vim.g.rex_nvim_cmdheight,vim.o.laststatus,#vim.api.nvim_list_tabpages()}
+if windowUI then
+ result[#result+1] = tabline
+ for _,s in ipairs(sizes) do result[#result+1] = vim.fn.getwininfo(s[1])[1].winbar or 0 end
+end
+return result
 `
 
 func (m *manager) fit() error {
@@ -265,6 +270,12 @@ func (m *manager) fit() error {
 	}
 	if len(sizes) == 0 {
 		return nil
+	}
+	m.mu.Lock()
+	windowUI := m.state.WindowUI()
+	m.mu.Unlock()
+	if windowUI {
+		return m.fitWindow(sizes)
 	}
 	var size []int
 	if err := m.uiOperation(func() error { return m.nv.ExecLua(measureLayout, &size, sizes) }); err != nil {

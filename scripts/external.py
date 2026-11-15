@@ -56,6 +56,7 @@ def main():
                     for b in l["blocks"]
                 )
                 and l.get("kind") != "tiled"
+                and (l["bounds"][2] < 0.999 or l["bounds"][3] >= 0.999)
                 and not any(b["block_id"] == initial for b in l["blocks"])
             ]
 

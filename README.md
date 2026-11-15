@@ -37,9 +37,14 @@ Neovim arguments pass through unchanged. Your normal configuration loads;
   blocks. Neovim controls their size and position; smaller terminals clip the
   rendered content without resizing plugin windows. Non-focusable floats leave
   keyboard focus in the editor.
-- Neovim tab pages switch the windows shown in the existing Rex tab. Separate
-  Nvim tabs/Buffers rows provide click navigation and follow `showtabline`.
-  Set `REX_NVIM_TABLINE=grid` to retain Neovim’s grid-rendered tabline.
+- Shared UI uses the full Rex window canvas: one global statusline
+  (`laststatus=3`), native tabline, command line, messages and completion menus
+  render in floating layers, never repeated inside editing splits. Window-local
+  winbars also use floating layers. Neovim
+  controls formatting and mouse behavior; custom statusline/tabline plugins work
+  through their native grids.
+- Neovim tab pages switch the editing splits shown in the existing Rex tab.
+  `showtabline` controls the native, full-width top tabline.
 - `:qa` exits the shared editor. Closing its **last tiled Rex block terminates
   the editor, including unsaved changes**. Closing the original block does not
   terminate other editor blocks.
@@ -64,16 +69,9 @@ make build
 make test
 go vet ./...
 python3 scripts/smoke.py
+python3 scripts/window_ui.py
 ```
 
 Unit tests include real-Neovim redraw checks when `nvim` is available. The smoke
 test requires a running Rex server, creates a disposable session, and removes
 it afterward. It does not switch the app's displayed session.
-
-Completion menus render in their owning pane; set `REX_NVIM_POPUPMENU=grid`
-to use Neovim’s grid-rendered fallback. Command lines and multiline command
-blocks also render pane-locally; `REX_NVIM_CMDLINE=grid` keeps their native grids.
-
-Messages and paged `:messages` history render pane-locally;
-`REX_NVIM_MESSAGES=grid` keeps native messages. Grid command lines also select
-grid messages, because external messages require external command lines.

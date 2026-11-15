@@ -46,8 +46,19 @@ func (s *State) Render(id, width, height int) string {
 		}
 	}
 	g := s.grids[id]
+	region, regionView := s.windowRegion(id)
+	if region != nil {
+		g = region
+	}
+	offset := s.ContentOffset(id)
 	if g != nil {
-		draw(g, 0, 0, 0, 0, g.height, g.width)
+		margin := 0
+		if s.windowUI && region == nil {
+			if p := s.views[id]; p != nil && !p.Float && !p.External {
+				margin = min(g.height, g.topMargin)
+			}
+		}
+		draw(g, offset+margin, 0, margin, 0, g.height-margin, g.width)
 	}
 	baseR, baseC, baseOK := s.origin(id, make(map[int]bool))
 	root := s.grids[1]
@@ -61,7 +72,7 @@ func (s *State) Render(id, width, height int) string {
 	}
 	// Winbar is already inside the window grid. Only the root row immediately
 	// below a tiled grid is its statusline; never copy an arbitrary row above it.
-	if p := s.views[id]; p != nil && !p.Float && !p.External && !p.Hidden && g != nil && root != nil {
+	if p := s.views[id]; !s.windowUI && p != nil && !p.Float && !p.External && !p.Hidden && g != nil && root != nil {
 		row := p.Row + g.height
 		show := s.lastStatus == 2 || (s.lastStatus == 1 && s.tiledCount() > 1)
 		srcCol := p.Col
@@ -98,7 +109,7 @@ func (s *State) Render(id, width, height int) string {
 		message = s.grids[s.messageGrid]
 		sourceStart = 0
 	}
-	if id != 1 && id == owner && root != nil && message != nil && !s.CmdlineActive() && !s.externalMessages {
+	if !s.windowUI && id != 1 && id == owner && root != nil && message != nil && !s.CmdlineActive() && !s.externalMessages {
 		rows := min(s.commandHeight, root.height)
 		if s.messageGrid != 0 {
 			rows = min(root.height-max(0, s.messageRow), message.height)
@@ -170,8 +181,17 @@ func (s *State) Render(id, width, height int) string {
 	}
 	out.WriteString("[0m")
 	cr, cc := s.cursorRow, s.cursorCol
+	cr += offset
 	show := s.cursorGrid == id
-	if (s.cursorGrid == 1 || s.cursorGrid == s.messageGrid) && id == s.lastWindow && commandRows > 0 {
+	if region != nil {
+		cr = s.cursorRow - regionView.Row
+		cc -= regionView.Col
+		if id == windowMessages && s.cursorGrid == s.messageGrid {
+			cr = s.cursorRow
+		}
+		show = s.cursorGrid == 1 || (id == windowMessages && s.cursorGrid == s.messageGrid)
+	}
+	if !s.windowUI && (s.cursorGrid == 1 || s.cursorGrid == s.messageGrid) && id == s.lastWindow && commandRows > 0 {
 		if s.cursorGrid == s.messageGrid {
 			cr += s.messageRow
 		}

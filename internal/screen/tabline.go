@@ -53,6 +53,9 @@ func (s *State) tabCount() int {
 // retain content; all navigation remains available through native commands.
 func (s *State) TablineRows(id, height int) int {
 	p := s.views[id]
+	if s.windowUI {
+		return 0
+	}
 	if p == nil || p.Hidden || p.Float || p.External || !s.tablineVisible() {
 		return 0
 	}

@@ -22,6 +22,7 @@ type cell struct {
 	hl   int
 }
 type grid struct {
+	topMargin     int
 	width, height int
 	cells         []cell
 }
@@ -42,6 +43,7 @@ type highlight struct {
 
 // State holds the latest redraw state. It is not safe for concurrent use.
 type State struct {
+	windowUI                  bool
 	messages                  messageState
 	externalMessages          bool
 	promptInput               bool
@@ -137,6 +139,7 @@ func (s *State) Views() []View {
 		}
 		out = append(out, v)
 	}
+	out = append(out, s.windowViews()...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Grid < out[j].Grid })
 	return out
 }
@@ -240,6 +243,7 @@ func (s *State) apply(name string, a []any) {
 		w, h := max(0, n(1)), max(0, n(2))
 		next := &grid{width: w, height: h, cells: blank(w * h)}
 		if g != nil {
+			next.topMargin = g.topMargin
 			for r := 0; r < min(h, g.height); r++ {
 				copy(next.cells[r*w:r*w+min(w, g.width)], g.cells[r*g.width:r*g.width+min(w, g.width)])
 			}
@@ -303,6 +307,10 @@ func (s *State) apply(name string, a []any) {
 				}
 				g.cells[r*g.width+c] = v
 			}
+		}
+	case "win_viewport_margins":
+		if p := s.views[id]; g != nil && p != nil && p.Window == n(1) {
+			g.topMargin = max(0, n(2))
 		}
 	case "win_pos":
 		s.views[id] = &placement{View: View{Grid: id, Window: n(1), Row: n(2), Col: n(3), Width: n(4), Height: n(5), Focusable: true}}

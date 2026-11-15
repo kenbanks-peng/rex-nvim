@@ -53,10 +53,13 @@ def main():
             ).strip()
 
         def blocks():
-            listed = json.loads(run("rex", "block", "ls", "-s", session, "--json"))
+            view = json.loads(run("rex", "session", "inspect", session, "--json"))
             return [
                 b["block_id"]
-                for b in listed["blocks"]
+                for w in view["windows"]
+                for layer in w["layers"]
+                if layer["kind"] == "tiled" or layer["bounds"][2] < 0.999
+                for b in layer["blocks"]
                 if not b.get("label", "").startswith("rex-statusline:")
             ]
 

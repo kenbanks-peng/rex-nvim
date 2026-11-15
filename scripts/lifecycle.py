@@ -54,11 +54,13 @@ def exercise(binary, tmp, failure):
         ).strip()
 
     def blocks():
+        view = json.loads(run("rex", "session", "inspect", session, "--json"))
         return [
             b["block_id"]
-            for b in json.loads(run("rex", "block", "ls", "-s", session, "--json"))[
-                "blocks"
-            ]
+            for w in view["windows"]
+            for layer in w["layers"]
+            if layer["kind"] == "tiled" or layer["bounds"][2] < 0.999
+            for b in layer["blocks"]
             if not b.get("label", "").startswith("rex-statusline:")
         ]
 
@@ -74,7 +76,7 @@ def exercise(binary, tmp, failure):
 
     def secondary_pid():
         return next(
-            (pid for pid, cmd in processes() if cmd.startswith(binary + " _pane ")),
+            (pid for pid, cmd in processes() if cmd.startswith(binary + " _pane ") and not cmd.rsplit(" ", 1)[-1].startswith("-")),
             None,
         )
 

@@ -17,7 +17,7 @@ type layoutNode struct {
 const readLayout = `
 local function read(n)
  if n[1]=='leaf' then
-  return {kind='leaf',window=n[2],width=vim.api.nvim_win_get_width(n[2]),height=vim.api.nvim_win_get_height(n[2])+1}
+  return {kind='leaf',window=n[2],width=vim.api.nvim_win_get_width(n[2]),height=vim.api.nvim_win_get_height(n[2])+(vim.fn.getwininfo(n[2])[1].winbar or 0)+1}
  end
  local children={}
  local width,height=0,0
@@ -182,5 +182,6 @@ func (m *manager) syncTopology() error {
 		}
 	}
 	m.layoutShape = shape
+	m.fittedLayout = node
 	return nil
 }

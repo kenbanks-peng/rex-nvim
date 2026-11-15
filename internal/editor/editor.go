@@ -54,6 +54,7 @@ type manager struct {
 	panes                       map[int]*peer
 	socket, executable, initial string
 	rootW, rootH                int
+	windowFit                   string
 	lastFocus                   int
 	uiFocusKnown, uiFocused     bool
 	focusBlock, rexFocusBlock   string
@@ -119,21 +120,9 @@ func Serve(parent context.Context, socket, session, block string, w, h int, args
 	if err = nv.ExecLua(configure, nil); err != nil {
 		return err
 	}
-	externalTabline := os.Getenv("REX_NVIM_TABLINE") != "grid"
-	m.state.SetExternalTabline(externalTabline)
-	externalPopupmenu := os.Getenv("REX_NVIM_POPUPMENU") != "grid"
-	m.state.SetExternalPopupmenu(externalPopupmenu)
-	externalCmdline := os.Getenv("REX_NVIM_CMDLINE") != "grid"
-	m.state.SetExternalCmdline(externalCmdline)
-	externalMessages := externalCmdline && os.Getenv("REX_NVIM_MESSAGES") != "grid"
-	m.state.SetExternalMessages(externalMessages)
-	if err = nv.AttachUI(w, h, screen.UIOptions(externalTabline, externalPopupmenu, externalCmdline, externalMessages)); err != nil {
+	m.state.SetWindowUI(true)
+	if err = nv.AttachUI(w, h, screen.UIOptions()); err != nil {
 		return err
-	}
-	if externalMessages {
-		if err = nv.ExecLua("vim.g.rex_nvim_cmdheight=vim.o.cmdheight", nil); err != nil {
-			return err
-		}
 	}
 	m.paint = make(chan struct{}, 1)
 	m.keys = make(chan incoming, 256)
@@ -386,6 +375,9 @@ func (m *manager) handle(e incoming) error {
 }
 func (m *manager) views() []screen.View { m.mu.Lock(); defer m.mu.Unlock(); return m.state.Views() }
 func (m *manager) focus(grid int) error {
+	if grid < 0 {
+		return nil
+	}
 	m.mu.Lock()
 	commandActive := m.state.CommandInputActive()
 	m.mu.Unlock()

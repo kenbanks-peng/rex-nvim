@@ -14,7 +14,7 @@ var handledEvents = map[string]bool{
 	"grid_resize": true, "grid_clear": true, "grid_destroy": true,
 	"grid_line": true, "grid_scroll": true, "grid_cursor_goto": true,
 	"win_external_pos": true, "win_pos": true, "win_float_pos": true, "win_hide": true,
-	"win_close": true, "msg_set_pos": true,
+	"win_close": true, "msg_set_pos": true, "win_viewport_margins": true,
 	"mode_info_set": true, "mode_change": true,
 	"hl_attr_define": true, "default_colors_set": true,
 }

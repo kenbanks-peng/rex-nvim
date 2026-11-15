@@ -9,15 +9,20 @@ import (
 )
 
 type inputRoute struct {
-	grid, window  int
-	width, height int
-	passive       bool
+	grid, window                int
+	width, height               int
+	rowOffset, rootRow, rootCol int
+	chrome                      bool
+	passive                     bool
 }
 
 func (m *manager) routePeer(p *peer) {
 	for _, v := range m.views() {
 		if v.Grid == p.grid {
-			p.route.Store(&inputRoute{grid: p.grid, window: v.Window, width: p.width, height: p.height, passive: v.Float && !v.Focusable})
+			m.mu.Lock()
+			offset := m.state.ContentOffset(p.grid)
+			m.mu.Unlock()
+			p.route.Store(&inputRoute{grid: p.grid, window: v.Window, width: p.width, height: p.height, rowOffset: offset, rootRow: v.Row, rootCol: v.Col, chrome: v.Grid < 0, passive: v.Float && !v.Focusable})
 			return
 		}
 	}
@@ -155,7 +160,14 @@ func (m *manager) deliverFast(e incoming) error {
 			}
 			return m.nv.InputMouse(msg.Button, msg.Action, msg.Modifier, 1, 0, msg.Col)
 		}
-		return m.nv.InputMouse(msg.Button, msg.Action, msg.Modifier, route.grid, msg.Row, msg.Col)
+		grid, row, col := route.grid, msg.Row-route.rowOffset, msg.Col
+		if route.chrome {
+			grid, row, col = 1, msg.Row+route.rootRow, msg.Col+route.rootCol
+		}
+		if row < 0 {
+			return nil
+		}
+		return m.nv.InputMouse(msg.Button, msg.Action, msg.Modifier, grid, row, col)
 	}
 	return nil
 }

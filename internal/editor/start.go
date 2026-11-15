@@ -102,6 +102,13 @@ func Run(ctx context.Context, args []string) error {
 }
 
 func (m *manager) disconnected(p *peer) error {
+	if p.grid < 0 {
+		delete(m.panes, p.grid)
+		if p.conn != nil {
+			p.conn.Close()
+		}
+		return nil
+	}
 	m.layoutShape = ""
 	delete(m.panes, p.grid)
 	if p.conn != nil {

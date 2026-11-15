@@ -56,7 +56,10 @@ func TestViewportMetadataGridFallbackLifecycle(t *testing.T) {
 }
 
 func TestViewportMetadataPolicy(t *testing.T) {
-	for _, name := range []string{"win_viewport", "win_viewport_margins", "win_extmark"} {
+	if c, ok := eventCapability("win_viewport_margins"); !ok || c.Status != "partial" || !handledEvents["win_viewport_margins"] {
+		t.Fatalf("margin policy = %+v", c)
+	}
+	for _, name := range []string{"win_viewport", "win_extmark"} {
 		c, ok := eventCapability(name)
 		if !ok || c.Status != "unsupported" || handledEvents[name] {
 			t.Fatalf("unconsumed metadata must remain explicit: %s %+v", name, c)
